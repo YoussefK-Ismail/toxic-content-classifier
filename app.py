@@ -98,14 +98,14 @@ def main():
         st.info(
             "This application classifies toxic content from:\n"
             "- 📝 Direct text input\n"
-            "- 🖼️ Image captions (using BLIP-2)"
+            "- 🖼️ Image captions (using BLIP-1)"
         )
         
         st.markdown("---")
         st.markdown("### Models Used")
         st.markdown("""
-        - **Image Captioning**: BLIP-2
-        - **Text Classification**: Toxic-BERT
+        - **Image Captioning**: BLIP-1
+        - **Text Classification**: LSTM
         """)
     
     # Load models with progress indicator
@@ -196,7 +196,8 @@ def handle_image_input():
         
         with col1:
             image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded Image", use_container_width=True)
+            # FIX: Changed use_container_width to width parameter
+            st.image(image, caption="Uploaded Image", width=400)
         
         with col2:
             if st.button("🔍 Generate Caption & Classify", type="primary", use_container_width=True):
