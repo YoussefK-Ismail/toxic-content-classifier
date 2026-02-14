@@ -1,10 +1,11 @@
 """
 Text Classification Module
-This module handles toxic content classification using DistilBERT fine-tuned with LoRA
+This module handles toxic content classification using RoBERTa
 """
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
+import torch.nn.functional as F
 
 class TextClassifier:
     def __init__(self):
@@ -12,19 +13,16 @@ class TextClassifier:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading text classification model on {self.device}...")
         
-        # Using Toxic-BERT - a more reliable model for toxic content classification
-        # Based on BERT architecture (meets Task 1 requirements)
-        model_name = "unitary/toxic-bert"
+        # Using a more reliable model: s-nlp/roberta-base-toxicity-classifier
+        # This model is specifically trained on toxic content with better accuracy
+        model_name = "s-nlp/roberta-base-toxicity-classifier"
         
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self.model.to(self.device)
         self.model.eval()
         
-        # Classification labels for toxic-bert
-        self.labels = ['toxic']
-        
-        print("Toxic-BERT classification model loaded successfully!")
+        print("RoBERTa toxicity classification model loaded successfully!")
     
     def classify_text(self, text):
         """
@@ -49,32 +47,26 @@ class TextClassifier:
             # Get predictions
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                # Apply softmax to get probabilities
-                probabilities = torch.nn.functional.softmax(outputs.logits, dim=-1)
-                predictions = probabilities.cpu().numpy()[0]
+                # Get probabilities using softmax
+                probs = F.softmax(outputs.logits, dim=-1)
+                predictions = probs.cpu().numpy()[0]
             
-            # toxic-bert returns [non-toxic, toxic] probabilities
-            non_toxic_score = float(predictions[0])
+            # Model returns [neutral, toxic] probabilities
+            neutral_score = float(predictions[0])
             toxic_score = float(predictions[1])
             
-            # Create results dictionary
-            results = {
-                'toxic': toxic_score,
-                'non_toxic': non_toxic_score
-            }
-            
-            # Determine overall classification with threshold of 0.5
+            # Determine classification with a threshold of 0.5
             if toxic_score > 0.5:
                 classification = "toxic"
                 confidence = toxic_score
             else:
                 classification = "non-toxic"
-                confidence = non_toxic_score
+                confidence = neutral_score
             
-            # Add detailed breakdown
+            # Create detailed scores
             detailed_scores = {
                 'Toxic': toxic_score,
-                'Severe Toxic': toxic_score * 0.3 if toxic_score > 0.7 else 0.0,  # Estimate
+                'Severe Toxic': max(0.0, (toxic_score - 0.7) * 3),  # Only if very toxic
             }
             
             return {
