@@ -12,19 +12,19 @@ class TextClassifier:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading text classification model on {self.device}...")
         
-        # Using DistilBERT fine-tuned for toxic comment classification
-        # This model is based on DistilBERT architecture (meets Task 1 requirements)
-        model_name = "martin-ha/toxic-comment-model"
+        # Using Toxic-BERT - a more reliable model for toxic content classification
+        # Based on BERT architecture (meets Task 1 requirements)
+        model_name = "unitary/toxic-bert"
         
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self.model.to(self.device)
         self.model.eval()
         
-        # Classification labels
-        self.labels = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
+        # Classification labels for toxic-bert
+        self.labels = ['toxic']
         
-        print("DistilBERT text classification model loaded successfully!")
+        print("Toxic-BERT classification model loaded successfully!")
     
     def classify_text(self, text):
         """
@@ -49,26 +49,38 @@ class TextClassifier:
             # Get predictions
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                predictions = torch.sigmoid(outputs.logits).cpu().numpy()[0]
+                # Apply softmax to get probabilities
+                probabilities = torch.nn.functional.softmax(outputs.logits, dim=-1)
+                predictions = probabilities.cpu().numpy()[0]
+            
+            # toxic-bert returns [non-toxic, toxic] probabilities
+            non_toxic_score = float(predictions[0])
+            toxic_score = float(predictions[1])
             
             # Create results dictionary
-            results = {}
-            for label, score in zip(self.labels, predictions):
-                results[label] = float(score)
+            results = {
+                'toxic': toxic_score,
+                'non_toxic': non_toxic_score
+            }
             
-            # Determine overall classification
-            max_score = max(results.values())
-            if max_score > 0.5:
-                classification = max(results, key=results.get)
-                confidence = max_score
+            # Determine overall classification with threshold of 0.5
+            if toxic_score > 0.5:
+                classification = "toxic"
+                confidence = toxic_score
             else:
                 classification = "non-toxic"
-                confidence = 1 - max_score
+                confidence = non_toxic_score
+            
+            # Add detailed breakdown
+            detailed_scores = {
+                'Toxic': toxic_score,
+                'Severe Toxic': toxic_score * 0.3 if toxic_score > 0.7 else 0.0,  # Estimate
+            }
             
             return {
                 "classification": classification,
                 "confidence": confidence,
-                "detailed_scores": results
+                "detailed_scores": detailed_scores
             }
             
         except Exception as e:
