@@ -1,6 +1,6 @@
 """
 Text Classification Module
-This module handles toxic content classification using RoBERTa
+This module handles toxic content classification
 """
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -13,16 +13,18 @@ class TextClassifier:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading text classification model on {self.device}...")
         
-        # Using a more reliable model: s-nlp/roberta-base-toxicity-classifier
-        # This model is specifically trained on toxic content with better accuracy
-        model_name = "s-nlp/roberta-base-toxicity-classifier"
+        # Using cardiffnlp offensive language classifier - very accurate
+        model_name = "cardiffnlp/twitter-roberta-base-offensive"
         
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self.model.to(self.device)
         self.model.eval()
         
-        print("RoBERTa toxicity classification model loaded successfully!")
+        # Model labels: not-offensive, offensive
+        self.labels = ['not-offensive', 'offensive']
+        
+        print("RoBERTa offensive language classifier loaded successfully!")
     
     def classify_text(self, text):
         """
@@ -51,22 +53,23 @@ class TextClassifier:
                 probs = F.softmax(outputs.logits, dim=-1)
                 predictions = probs.cpu().numpy()[0]
             
-            # Model returns [neutral, toxic] probabilities
-            neutral_score = float(predictions[0])
-            toxic_score = float(predictions[1])
+            # Model returns [not-offensive, offensive] probabilities
+            not_offensive_score = float(predictions[0])
+            offensive_score = float(predictions[1])
             
-            # Determine classification with a threshold of 0.5
-            if toxic_score > 0.5:
+            # Determine classification
+            # Using lower threshold (0.3) to catch more toxic content
+            if offensive_score > 0.3:
                 classification = "toxic"
-                confidence = toxic_score
+                confidence = offensive_score
             else:
                 classification = "non-toxic"
-                confidence = neutral_score
+                confidence = not_offensive_score
             
             # Create detailed scores
             detailed_scores = {
-                'Toxic': toxic_score,
-                'Severe Toxic': max(0.0, (toxic_score - 0.7) * 3),  # Only if very toxic
+                'Toxic': offensive_score,
+                'Severe Toxic': max(0.0, (offensive_score - 0.7) * 2.5),
             }
             
             return {
