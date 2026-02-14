@@ -1,30 +1,32 @@
 """
 Text Classification Module
-This module handles toxic content classification
+This module handles toxic content classification using Zero-Shot Classification
 """
 
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
-import torch.nn.functional as F
+from transformers import pipeline
+import re
 
 class TextClassifier:
     def __init__(self):
-        """Initialize text classification model"""
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Loading text classification model on {self.device}...")
+        """Initialize zero-shot classification model"""
+        print(f"Loading zero-shot classification model...")
         
-        # Using cardiffnlp offensive language classifier - very accurate
-        model_name = "cardiffnlp/twitter-roberta-base-offensive"
+        # Using zero-shot classification - most flexible and accurate
+        self.classifier = pipeline(
+            "zero-shot-classification",
+            model="facebook/bart-large-mnli",
+            device=-1  # CPU
+        )
         
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        self.model.to(self.device)
-        self.model.eval()
+        # Toxic keywords for additional checking
+        self.toxic_keywords = [
+            'hate', 'stupid', 'idiot', 'dumb', 'fool', 'moron',
+            'kill', 'die', 'death', 'damn', 'hell', 'shit',
+            'fuck', 'bitch', 'ass', 'bastard', 'loser', 'ugly',
+            'worthless', 'useless', 'pathetic', 'trash', 'garbage'
+        ]
         
-        # Model labels: not-offensive, offensive
-        self.labels = ['not-offensive', 'offensive']
-        
-        print("RoBERTa offensive language classifier loaded successfully!")
+        print("Zero-shot classification model loaded successfully!")
     
     def classify_text(self, text):
         """
@@ -37,45 +39,65 @@ class TextClassifier:
             dict: Classification results with probabilities
         """
         try:
-            # Tokenize input
-            inputs = self.tokenizer(
-                text,
-                return_tensors="pt",
-                truncation=True,
-                max_length=512,
-                padding=True
-            ).to(self.device)
+            # Convert to lowercase for checking
+            text_lower = text.lower()
             
-            # Get predictions
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                # Get probabilities using softmax
-                probs = F.softmax(outputs.logits, dim=-1)
-                predictions = probs.cpu().numpy()[0]
+            # Check for toxic keywords
+            keyword_score = 0
+            found_keywords = []
+            for keyword in self.toxic_keywords:
+                if keyword in text_lower:
+                    keyword_score += 1
+                    found_keywords.append(keyword)
             
-            # Model returns [not-offensive, offensive] probabilities
-            not_offensive_score = float(predictions[0])
-            offensive_score = float(predictions[1])
+            # Normalize keyword score (0-1)
+            keyword_toxicity = min(keyword_score * 0.3, 1.0)
             
-            # Determine classification
-            # Using lower threshold (0.3) to catch more toxic content
-            if offensive_score > 0.3:
+            # Use zero-shot classification
+            candidate_labels = ["friendly positive message", "toxic offensive hateful message"]
+            result = self.classifier(text, candidate_labels)
+            
+            # Get toxic probability (index 1 = toxic)
+            if result['labels'][0] == "toxic offensive hateful message":
+                model_toxic_score = result['scores'][0]
+            else:
+                model_toxic_score = result['scores'][1]
+            
+            # Combine both scores (weighted average)
+            # Give more weight to keyword matching for clear cases
+            if keyword_score > 0:
+                toxic_score = (keyword_toxicity * 0.6) + (model_toxic_score * 0.4)
+            else:
+                toxic_score = model_toxic_score
+            
+            # Ensure score is between 0 and 1
+            toxic_score = min(max(toxic_score, 0.0), 1.0)
+            non_toxic_score = 1.0 - toxic_score
+            
+            # Classification with threshold
+            if toxic_score > 0.4:  # Lower threshold for better detection
                 classification = "toxic"
-                confidence = offensive_score
+                confidence = toxic_score
             else:
                 classification = "non-toxic"
-                confidence = not_offensive_score
+                confidence = non_toxic_score
             
             # Create detailed scores
             detailed_scores = {
-                'Toxic': offensive_score,
-                'Severe Toxic': max(0.0, (offensive_score - 0.7) * 2.5),
+                'Toxic': toxic_score,
+                'Severe Toxic': max(0.0, (toxic_score - 0.7) * 2.0),
             }
+            
+            # Add debug info if keywords found
+            debug_info = ""
+            if found_keywords:
+                debug_info = f" (Found keywords: {', '.join(found_keywords)})"
             
             return {
                 "classification": classification,
                 "confidence": confidence,
-                "detailed_scores": detailed_scores
+                "detailed_scores": detailed_scores,
+                "debug": debug_info
             }
             
         except Exception as e:
